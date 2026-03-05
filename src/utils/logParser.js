@@ -142,10 +142,11 @@ function parseCodexSessionEntries(content) {
       },
     };
 
+    const turnKey = currentTurn.turnId || (entries.length + 1);
     entries.push({
       timestamp,
       project,
-      url: `codex://session/${sessionId}/turn/${entries.length + 1}`,
+      url: `codex://session/${sessionId}/turn/${turnKey}`,
       method: 'SESSION',
       provider: 'openai',
       mainAgent: true,
@@ -246,4 +247,3 @@ export function parseLogEntriesContent(content) {
   const codexEntries = parseCodexSessionEntries(content);
   return codexEntries;
 }
-

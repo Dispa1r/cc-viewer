@@ -233,13 +233,25 @@ class App extends React.Component {
         try {
           const entries = JSON.parse(event.data);
           if (Array.isArray(entries)) {
-            this.assignMessageTimestamps(entries);
-            const mainAgentSessions = this.buildSessionsFromEntries(entries);
-            const filtered = filterRelevantRequests(entries);
-            if (entries.length > 0) {
-              this.animateLoadingCount(entries.length, () => {
+            const isCodexSnapshot = entries.every(e =>
+              e && typeof e === 'object' &&
+              e.method === 'SESSION' &&
+              typeof e.url === 'string' &&
+              e.url.startsWith('codex://session/')
+            );
+
+            const mergedEntries = isCodexSnapshot
+              ? this.mergeEntriesByKey(this.state.requests, entries)
+              : entries;
+
+            this.assignMessageTimestamps(mergedEntries);
+            const mainAgentSessions = this.buildSessionsFromEntries(mergedEntries);
+            const filtered = filterRelevantRequests(mergedEntries);
+
+            if (mergedEntries.length > 0) {
+              this.animateLoadingCount(mergedEntries.length, () => {
                 this.setState({
-                  requests: entries,
+                  requests: mergedEntries,
                   selectedIndex: filtered.length > 0 ? filtered.length - 1 : null,
                   mainAgentSessions,
                   fileLoading: false,
@@ -248,7 +260,7 @@ class App extends React.Component {
               });
             } else {
               this.setState({
-                requests: entries,
+                requests: mergedEntries,
                 selectedIndex: null,
                 mainAgentSessions,
                 fileLoading: false,
@@ -267,6 +279,23 @@ class App extends React.Component {
       console.error('EventSource初始化失败:', error);
       this.setState({ fileLoading: false, fileLoadingCount: 0 });
     }
+  }
+
+  mergeEntriesByKey(oldEntries, newEntries) {
+    const map = new Map();
+    const put = (entry) => {
+      if (!entry || typeof entry !== 'object') return;
+      const key = `${entry.url || ''}|${entry.timestamp || ''}`;
+      map.set(key, entry);
+    };
+    oldEntries.forEach(put);
+    newEntries.forEach(put);
+    return Array.from(map.values()).sort((a, b) => {
+      const ta = new Date(a.timestamp || 0).getTime();
+      const tb = new Date(b.timestamp || 0).getTime();
+      if (ta !== tb) return ta - tb;
+      return String(a.url || '').localeCompare(String(b.url || ''));
+    });
   }
 
   loadLocalLogFile(file) {

@@ -56,7 +56,7 @@ test('parse codex session jsonl format', () => {
   assert.equal(entries.length, 1);
   assert.equal(entries[0].provider, 'openai');
   assert.equal(entries[0].mainAgent, true);
-  assert.match(entries[0].url, /codex:\/\/session\/sess-1\/turn\/1/);
+  assert.match(entries[0].url, /codex:\/\/session\/sess-1\/turn\/(t1|1)/);
 
   const msgs = entries[0].body.messages;
   assert.equal(msgs[0].role, 'user');

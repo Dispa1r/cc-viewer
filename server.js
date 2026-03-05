@@ -225,10 +225,11 @@ function parseCodexSessionContent(content) {
 
     const usage = mapTokenUsage(currentTurn.tokenUsage || latestUsage);
     const timestamp = currentTurn.endTimestamp || baseTs;
+    const turnKey = currentTurn.turnId || (entries.length + 1);
     entries.push({
       timestamp,
       project,
-      url: `codex://session/${sessionId}/turn/${entries.length + 1}`,
+      url: `codex://session/${sessionId}/turn/${turnKey}`,
       method: 'SESSION',
       provider: 'openai',
       mainAgent: true,
