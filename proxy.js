@@ -22,7 +22,7 @@ function getBaseUrlFromSettings(settingsPath) {
   return null;
 }
 
-function getOriginalBaseUrl() {
+function getAnthropicBaseUrl() {
   let cwd;
   try { cwd = process.cwd(); } catch { cwd = null; }
 
@@ -48,10 +48,40 @@ function getOriginalBaseUrl() {
   return 'https://api.anthropic.com';
 }
 
-export function startProxy() {
+function getOpenAIBaseUrl() {
+  const candidates = [
+    process.env.OPENAI_BASE_URL,
+    process.env.OPENAI_API_BASE_URL,
+    process.env.OPENAI_API_BASE,
+  ];
+  for (const v of candidates) {
+    if (v && typeof v === 'string') return v;
+  }
+  return 'https://api.openai.com/v1';
+}
+
+function buildForwardUrl(baseUrl, reqUrl) {
+  const base = new URL(baseUrl);
+  const req = new URL(reqUrl, 'http://127.0.0.1');
+  let reqPath = req.pathname || '/';
+  const basePath = base.pathname || '/';
+
+  if (basePath.endsWith('/v1') && reqPath.startsWith('/v1/')) {
+    reqPath = reqPath.slice(3);
+  }
+
+  const normalizedBasePath = basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;
+  const normalizedReqPath = reqPath.startsWith('/') ? reqPath : `/${reqPath}`;
+  base.pathname = `${normalizedBasePath}${normalizedReqPath}`.replace(/\/{2,}/g, '/');
+  base.search = req.search || '';
+  return base.toString();
+}
+
+export function startProxy(options = {}) {
+  const provider = options.provider === 'openai' ? 'openai' : 'anthropic';
   return new Promise((resolve, reject) => {
     const server = createServer(async (req, res) => {
-      const originalBaseUrl = getOriginalBaseUrl();
+      const originalBaseUrl = provider === 'openai' ? getOpenAIBaseUrl() : getAnthropicBaseUrl();
 
       // Use the patched fetch (which logs to cc-viewer)
       try {
@@ -78,10 +108,8 @@ export function startProxy() {
           fetchOptions.body = body;
         }
 
-        // 拼接完整 URL，保留 originalBaseUrl 中的路径前缀
-        const cleanBase = originalBaseUrl.endsWith('/') ? originalBaseUrl.slice(0, -1) : originalBaseUrl;
-        const cleanReq = req.url.startsWith('/') ? req.url.slice(1) : req.url;
-        const fullUrl = `${cleanBase}/${cleanReq}`;
+        // 拼接完整 URL，并处理 baseUrl 带路径前缀时的重复路径问题（如 /v1 + /v1/responses）
+        const fullUrl = buildForwardUrl(originalBaseUrl, req.url || '/');
 
         const response = await fetch(fullUrl, fetchOptions);
 

@@ -238,6 +238,11 @@ class AppHeader extends React.Component {
     const models = Object.keys(byModel);
     const toolStats = computeToolUsageStats(requests);
     const skillStats = computeSkillUsageStats(requests);
+    const providerCounts = requests.reduce((acc, req) => {
+      const key = req.provider === 'openai' || (req.url || '').startsWith('codex://') ? 'Codex' : 'Claude';
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
 
     if (models.length === 0 && toolStats.length === 0) {
       return (
@@ -356,6 +361,21 @@ class AppHeader extends React.Component {
 
     return (
       <div className={styles.tokenStatsContainer}>
+        <div className={styles.toolStatsColumn}>
+          <div className={styles.modelCard}>
+            <div className={styles.modelName}>Provider</div>
+            <table className={styles.statsTable}>
+              <tbody>
+                {Object.entries(providerCounts).map(([name, count]) => (
+                  <tr key={name} className={styles.rowBorder}>
+                    <td className={styles.label}>{name}</td>
+                    <td className={styles.td}>{count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
         {tokenColumn}
         {cacheRebuildColumn}
         {toolColumn}
@@ -366,7 +386,8 @@ class AppHeader extends React.Component {
 
   renderCacheRebuildStats() {
     const { requests = [] } = this.props;
-    const stats = computeCacheRebuildStats(requests);
+    const claudeRequests = requests.filter(r => !(r.provider === 'openai' || (r.url || '').startsWith('codex://')));
+    const stats = computeCacheRebuildStats(claudeRequests);
     const reasonKeys = ['ttl', 'system_change', 'tools_change', 'model_change', 'msg_truncated', 'msg_modified', 'key_change'];
     const i18nMap = {
       ttl: 'ttl', system_change: 'systemChange', tools_change: 'toolsChange',
@@ -379,8 +400,8 @@ class AppHeader extends React.Component {
 
     // SubAgent 统计
     const subAgentCounts = {};
-    for (let i = 0; i < requests.length; i++) {
-      const cls = classifyRequest(requests[i], requests[i + 1]);
+    for (let i = 0; i < claudeRequests.length; i++) {
+      const cls = classifyRequest(claudeRequests[i], claudeRequests[i + 1]);
       if (cls.type === 'SubAgent') {
         const label = cls.subType || 'Other';
         subAgentCounts[label] = (subAgentCounts[label] || 0) + 1;

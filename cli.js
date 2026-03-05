@@ -160,12 +160,8 @@ function removeCliJsInjection() {
   }
 }
 
-async function runProxyCommand(args) {
+async function runProxyCommand(args, options = {}) {
   try {
-    // Dynamic import to avoid side effects when just installing
-    const { startProxy } = await import('./proxy.js');
-    const proxyPort = await startProxy();
-
     // args = ['run', '--', 'command', 'claude', ...] or ['run', 'claude', ...]
     // Our hook uses: ccv run -- claude --ccv-internal "$@"
     // args[0] is 'run'.
@@ -182,6 +178,15 @@ async function runProxyCommand(args) {
       process.exit(1);
     }
     let cmdArgs = args.slice(cmdStartIndex + 1);
+    const provider = options.provider || (cmd === 'codex' ? 'openai' : 'anthropic');
+    process.env.CCV_PROVIDER = provider;
+
+    // Dynamic import to avoid side effects when just installing.
+    // NOTE: must happen after CCV_PROVIDER is set, because interceptor/findcc
+    // resolves LOG_DIR at import-time.
+    const { startProxy } = await import('./proxy.js');
+
+    const proxyPort = await startProxy({ provider });
 
     // If cmd is 'claude' and next arg is '--ccv-internal', remove it
     // and we must use 'command claude' to avoid infinite recursion of the shell function?
@@ -197,6 +202,7 @@ async function runProxyCommand(args) {
     }
 
     const env = { ...process.env };
+    env.CCV_PROVIDER = provider;
     // Determine the path to the native 'claude' executable
     if (cmd === 'claude') {
       const nativePath = resolveNativePath();
@@ -204,17 +210,25 @@ async function runProxyCommand(args) {
         cmd = nativePath;
       }
     }
-    env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+    const localProxyUrl = `http://127.0.0.1:${proxyPort}`;
+    if (provider === 'openai') {
+      env.OPENAI_BASE_URL = localProxyUrl;
+      env.OPENAI_API_BASE_URL = localProxyUrl;
+      env.OPENAI_API_BASE = localProxyUrl;
+    } else {
+      env.ANTHROPIC_BASE_URL = localProxyUrl;
+    }
     env.CCV_PROXY_MODE = '1'; // 告诉 interceptor.js 不要再启动 server
 
-    const settingsJson = JSON.stringify({
-      env: {
-        ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL
-      }
-    });
-
-    cmdArgs.unshift(settingsJson);
-    cmdArgs.unshift('--settings');
+    if (provider === 'anthropic') {
+      const settingsJson = JSON.stringify({
+        env: {
+          ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL
+        }
+      });
+      cmdArgs.unshift(settingsJson);
+      cmdArgs.unshift('--settings');
+    }
 
     const child = spawn(cmd, cmdArgs, { stdio: 'inherit', env });
 
@@ -321,6 +335,8 @@ if (isCliMode || isDangerousMode) {
   });
 } else if (args[0] === 'run') {
   runProxyCommand(args);
+} else if (args[0] === 'codex') {
+  runProxyCommand(['run', '--', 'codex', ...args.slice(1)], { provider: 'openai' });
 } else if (isUninstall) {
   const cliResult = removeCliJsInjection();
   const shellResult = removeShellHook();

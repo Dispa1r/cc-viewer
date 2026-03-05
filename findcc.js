@@ -8,8 +8,20 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 // ============ 配置区（第三方适配只需修改此处）============
 
-// 日志存储根目录（所有项目日志、偏好设置均存放于此）
-export const LOG_DIR = join(homedir(), '.claude', 'cc-viewer');
+function resolveLogDir() {
+  const forced = process.env.CCV_LOG_DIR;
+  if (forced && typeof forced === 'string') {
+    return forced;
+  }
+  const provider = (process.env.CCV_PROVIDER || '').toLowerCase();
+  if (provider === 'openai' || provider === 'codex') {
+    return join(homedir(), '.codex', 'cc-viewer');
+  }
+  return join(homedir(), '.claude', 'cc-viewer');
+}
+
+// 日志存储根目录（按 provider 分隔，避免 codex 与 claude 相互污染）
+export const LOG_DIR = resolveLogDir();
 
 // npm 包名候选列表（按优先级排列）
 export const PACKAGES = ['@anthropic-ai/claude-code', '@ali/claude-code'];

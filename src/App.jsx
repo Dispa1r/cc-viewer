@@ -12,6 +12,7 @@ import { t, getLang, setLang } from './i18n';
 import { formatTokenCount, filterRelevantRequests, findPrevMainAgentTimestamp } from './utils/helpers';
 import { isMainAgent } from './utils/contentFilter';
 import { classifyRequest } from './utils/requestType';
+import { parseLogEntriesContent } from './utils/logParser';
 import styles from './App.module.css';
 
 class App extends React.Component {
@@ -123,6 +124,66 @@ class App extends React.Component {
     if (this.eventSource) this.eventSource.close();
     if (this._autoSelectTimer) clearTimeout(this._autoSelectTimer);
     if (this._loadingCountTimer) cancelAnimationFrame(this._loadingCountTimer);
+  }
+
+  extractTextFromOpenAIInput(input) {
+    if (typeof input === 'string') return input;
+    if (!Array.isArray(input)) return '';
+    const parts = [];
+    for (const item of input) {
+      if (!item || typeof item !== 'object') continue;
+      if (typeof item.content === 'string') {
+        parts.push(item.content);
+        continue;
+      }
+      if (Array.isArray(item.content)) {
+        for (const block of item.content) {
+          if (!block || typeof block !== 'object') continue;
+          if (typeof block.text === 'string') parts.push(block.text);
+          else if (typeof block.input_text === 'string') parts.push(block.input_text);
+        }
+      }
+    }
+    return parts.join('\n').trim();
+  }
+
+  extractTextFromOpenAIOutput(responseBody) {
+    if (!responseBody) return '';
+    if (typeof responseBody === 'string') return responseBody;
+    if (typeof responseBody.output_text === 'string') return responseBody.output_text;
+    const output = Array.isArray(responseBody.output) ? responseBody.output : [];
+    const parts = [];
+    for (const item of output) {
+      if (!item || typeof item !== 'object') continue;
+      if (typeof item.text === 'string') parts.push(item.text);
+      const content = Array.isArray(item.content) ? item.content : [];
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue;
+        if (typeof block.text === 'string') parts.push(block.text);
+        else if (typeof block.output_text === 'string') parts.push(block.output_text);
+      }
+    }
+    return parts.join('\n').trim();
+  }
+
+  getEntryMessages(entry) {
+    if (!entry || !entry.body) return null;
+    if (Array.isArray(entry.body.messages)) return entry.body.messages;
+    if (entry.provider !== 'openai' && !/\/v1\/responses|\/v1\/chat\/completions/.test(entry.url || '')) return null;
+    if (Array.isArray(entry._normalizedMessages)) return entry._normalizedMessages;
+
+    const msgs = [];
+    const userText = this.extractTextFromOpenAIInput(entry.body.input ?? entry.body.messages ?? '');
+    if (userText) {
+      msgs.push({ role: 'user', content: [{ type: 'text', text: userText }] });
+    }
+    const assistantText = this.extractTextFromOpenAIOutput(entry.response?.body);
+    if (assistantText) {
+      msgs.push({ role: 'assistant', content: [{ type: 'text', text: assistantText }] });
+    }
+
+    entry._normalizedMessages = msgs;
+    return msgs;
   }
 
   animateLoadingCount(target, onDone) {
@@ -300,11 +361,12 @@ class App extends React.Component {
 
         // 合并 mainAgent sessions
         let mainAgentSessions = prev.mainAgentSessions;
-        if (isMainAgent(entry) && entry.body && Array.isArray(entry.body.messages)) {
+        const entryMessages = this.getEntryMessages(entry);
+        if (isMainAgent(entry) && Array.isArray(entryMessages)) {
           const timestamp = entry.timestamp || new Date().toISOString();
           const lastSession = mainAgentSessions.length > 0 ? mainAgentSessions[mainAgentSessions.length - 1] : null;
           const prevMessages = lastSession?.messages || [];
-          const messages = entry.body.messages;
+          const messages = entryMessages;
           const prevCount = prevMessages.length;
 
           // 检测 session 切换（消息数量骤降）
@@ -351,8 +413,9 @@ class App extends React.Component {
     let timestamps = []; // 累积的时间戳数组，索引对应消息位置
     let prevUserId = null;
     for (const entry of entries) {
-      if (!isMainAgent(entry) || !entry.body || !Array.isArray(entry.body.messages)) continue;
-      const messages = entry.body.messages;
+      if (!isMainAgent(entry)) continue;
+      const messages = this.getEntryMessages(entry);
+      if (!Array.isArray(messages)) continue;
       const count = messages.length;
       const userId = entry.body.metadata?.user_id || null;
       const timestamp = entry.timestamp || new Date().toISOString();
@@ -387,7 +450,7 @@ class App extends React.Component {
   buildSessionsFromEntries(entries) {
     let sessions = [];
     for (const entry of entries) {
-      if (isMainAgent(entry) && entry.body && Array.isArray(entry.body.messages)) {
+      if (isMainAgent(entry) && Array.isArray(this.getEntryMessages(entry))) {
         sessions = this.mergeMainAgentSessions(sessions, entry);
       }
     }
@@ -401,9 +464,10 @@ class App extends React.Component {
    * 消息时间戳已由 assignMessageTimestamps 预先注入到 message._timestamp。
    */
   mergeMainAgentSessions(prevSessions, entry) {
-    const newMessages = entry.body.messages;
+    const newMessages = this.getEntryMessages(entry);
+    if (!Array.isArray(newMessages)) return prevSessions;
     const newResponse = entry.response;
-    const userId = entry.body.metadata?.user_id || null;
+    const userId = entry.body?.metadata?.user_id || null;
 
     const entryTimestamp = entry.timestamp || null;
 
@@ -686,9 +750,7 @@ class App extends React.Component {
       reader.onload = (ev) => {
         try {
           const content = ev.target.result;
-          const entries = content.split('\n---\n').filter(line => line.trim()).map(entry => {
-            try { return JSON.parse(entry); } catch { return null; }
-          }).filter(Boolean);
+          const entries = parseLogEntriesContent(content);
           if (entries.length === 0) {
             message.error(t('ui.noLogs'));
             this.setState({ fileLoading: false, fileLoadingCount: 0 });
@@ -697,7 +759,7 @@ class App extends React.Component {
           this.animateLoadingCount(entries.length, () => {
             let mainAgentSessions = [];
             for (const entry of entries) {
-              if (isMainAgent(entry) && entry.body && Array.isArray(entry.body.messages)) {
+              if (isMainAgent(entry) && Array.isArray(this.getEntryMessages(entry))) {
                 mainAgentSessions = this.mergeMainAgentSessions(mainAgentSessions, entry);
               }
             }

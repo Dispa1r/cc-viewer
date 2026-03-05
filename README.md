@@ -33,6 +33,23 @@ By default, `ccv` runs in silent mode when wrapping `claude`, keeping your termi
 
 Once configured, use the `claude` command as normal. Visit `http://localhost:7008` to access the monitoring interface.
 
+### Codex Support (OpenAI)
+
+Run Codex through CC-Viewer proxy mode:
+
+```bash
+ccv codex
+```
+
+You can pass extra Codex args directly:
+
+```bash
+ccv codex --help
+ccv codex "<your prompt>"
+```
+
+In this mode, CC-Viewer injects local proxy env vars for OpenAI-compatible clients (`OPENAI_BASE_URL`, `OPENAI_API_BASE_URL`, `OPENAI_API_BASE`) and forwards to your original OpenAI base URL (defaults to `https://api.openai.com/v1`).
+
 ### Troubleshooting
 
 If you encounter issues starting cc-viewer, here is the ultimate troubleshooting approach:

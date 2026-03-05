@@ -78,13 +78,15 @@ class RequestList extends React.Component {
                   <div className={styles.itemHeader}>
                     {reqType === 'MainAgent'
                       ? <Tag color="orange" className={styles.tagNoMargin}>MainAgent</Tag>
+                      : reqType === 'CodexTurn'
+                        ? <Tag color="geekblue" className={styles.tagNoMargin}>{formatRequestTag(reqType, subType)}</Tag>
                       : reqType === 'Plan'
                         ? <Tag className={styles.tagNoMargin} style={{ color: '#a33', borderColor: '#a33', backgroundColor: '#000' }}>{formatRequestTag(reqType, subType)}</Tag>
                         : reqType === 'Count' || reqType === 'Preflight'
                           ? <Tag className={styles.tagNoMargin} style={{ color: '#666', borderColor: '#444', backgroundColor: '#000' }}>{reqType}</Tag>
                           : <Tag className={styles.tagNoMargin}>{formatRequestTag(reqType, subType)}</Tag>
                     }
-                    {model && <span className={styles.modelName} style={{ color: reqType === 'MainAgent' ? '#d4822d' : '#8c8c8c' }}>{model}</span>}
+                    {model && <span className={styles.modelName} style={{ color: reqType === 'MainAgent' ? '#d4822d' : reqType === 'CodexTurn' ? '#2f54eb' : '#8c8c8c' }}>{model}</span>}
                     <span className={styles.time}>{time}</span>
                   </div>
                   <div className={styles.detailRow}>
@@ -101,6 +103,9 @@ class RequestList extends React.Component {
                       <div>token: output:{formatTokenCount(outputTokens) || 0}, input: {formatTokenCount(inputTokens) || 0}</div>
                       {(cacheRead > 0 || cacheCreate > 0) && (
                         <div>{(() => {
+                          if (reqType === 'CodexTurn') {
+                            return <>cache: {cacheRead > 0 ? `read:${formatTokenCount(cacheRead)}` : ''}{cacheRead > 0 && cacheCreate > 0 ? ', ' : ''}{cacheCreate > 0 ? `create:${formatTokenCount(cacheCreate)}` : ''}</>;
+                          }
                           const loss = analyzeCacheLoss(requests, index);
                           const reasonI18nMap = {
                             ttl: 'ui.cacheLoss.ttl',

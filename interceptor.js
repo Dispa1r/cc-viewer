@@ -243,6 +243,60 @@ function isAnthropicApiPath(urlStr) {
   }
 }
 
+function isOpenAIApiPath(urlStr) {
+  try {
+    const pathname = new URL(urlStr).pathname;
+    return /^\/v1\/(responses|chat\/completions|completions)$/.test(pathname);
+  } catch {
+    return /\/v1\/(responses|chat\/completions|completions)/.test(urlStr);
+  }
+}
+
+function extractSseEvents(streamedContent) {
+  return streamedContent.split('\n\n')
+    .filter(block => block.trim())
+    .map(block => {
+      const lines = block.split('\n');
+      const dataLine = lines.find(l => l.startsWith('data:'));
+      if (!dataLine) return null;
+      const raw = dataLine.startsWith('data: ') ? dataLine.substring(6) : dataLine.substring(5);
+      if (raw === '[DONE]') return { type: 'done' };
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
+    })
+    .filter(Boolean);
+}
+
+function assembleOpenAIResponse(events) {
+  let completedResponse = null;
+  let outputText = '';
+
+  for (const event of events) {
+    if (!event || typeof event !== 'object') continue;
+    if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
+      outputText += event.delta;
+    } else if (event.type === 'response.completed' && event.response && typeof event.response === 'object') {
+      completedResponse = event.response;
+    }
+  }
+
+  if (completedResponse) {
+    if (outputText && !completedResponse.output_text) {
+      completedResponse.output_text = outputText;
+    }
+    return completedResponse;
+  }
+
+  if (outputText) {
+    return { output_text: outputText, events };
+  }
+
+  return null;
+}
+
 // 组装流式消息为完整的 message 对象
 function assembleStreamMessage(events) {
   let message = null;
@@ -400,7 +454,7 @@ export function setupInterceptor() {
       const isProxyTrace = headers['x-cc-viewer-trace'] === 'true' || headers['x-cc-viewer-trace'] === true;
 
       // 如果是 proxy 转发的，或者符合 URL 规则
-      if (isProxyTrace || urlStr.includes('anthropic') || urlStr.includes('claude') || (CUSTOM_API_HOST && urlStr.includes(CUSTOM_API_HOST)) || isAnthropicApiPath(urlStr)) {
+      if (isProxyTrace || urlStr.includes('anthropic') || urlStr.includes('claude') || urlStr.includes('openai') || (CUSTOM_API_HOST && urlStr.includes(CUSTOM_API_HOST)) || isAnthropicApiPath(urlStr) || isOpenAIApiPath(urlStr)) {
         // 如果是 proxy 转发的，需要清理掉标记 header 避免发给上游
         if (isProxyTrace && options?.headers) {
           delete options.headers['x-cc-viewer-trace'];
@@ -456,11 +510,13 @@ export function setupInterceptor() {
           }
         }
 
+        const isOpenAI = urlStr.includes('openai') || isOpenAIApiPath(urlStr);
         requestEntry = {
           timestamp,
           project: (() => { try { return basename(process.cwd()); } catch { return 'unknown'; } })(),
           url: urlStr,
           method: options?.method || 'GET',
+          provider: isOpenAI ? 'openai' : 'anthropic',
           headers: safeHeaders,
           body: body,
           response: null,
@@ -469,6 +525,14 @@ export function setupInterceptor() {
           isHeartbeat: /\/api\/eval\/sdk-/.test(urlStr),
           isCountTokens: /\/messages\/count_tokens/.test(urlStr),
           mainAgent: (() => {
+            if (isOpenAI) {
+              const hasInput = typeof body?.input === 'string'
+                || Array.isArray(body?.input)
+                || Array.isArray(body?.messages);
+              const model = typeof body?.model === 'string' ? body.model : '';
+              const codexLikeModel = /codex|gpt-5/i.test(model);
+              return hasInput && codexLikeModel;
+            }
             if (!body?.system || !Array.isArray(body?.tools) || body.tools.length <= 10) return false;
             if (!['Edit', 'Bash'].every(n => body.tools.some(t => t.name === n))) return false;
             if (!body.tools.some(t => t.name === 'Task' || t.name === 'Agent')) return false;
@@ -535,32 +599,12 @@ export function setupInterceptor() {
                     streamedContent += decoder.decode();
                     // 流结束，组装完整的消息对象
                     try {
-                      const events = streamedContent.split('\n\n')
-                        .filter(block => block.trim())
-                        .map(block => {
-                          // SSE 块可能包含多行: event: xxx\ndata: {...}
-                          const lines = block.split('\n');
-                          const dataLine = lines.find(l => l.startsWith('data:'));
-                          if (dataLine) {
-                            // 处理 "data:" 或 "data: " 两种格式
-                            const jsonStr = dataLine.startsWith('data: ')
-                              ? dataLine.substring(6)
-                              : dataLine.substring(5);
-                            try {
-                              return JSON.parse(jsonStr);
-                            } catch {
-                              return jsonStr;
-                            }
-                          }
-                          return null;
-                        })
-                        .filter(Boolean);
+                      const events = extractSseEvents(streamedContent);
+                      const assembledMessage = requestEntry.provider === 'openai'
+                        ? assembleOpenAIResponse(events)
+                        : assembleStreamMessage(events);
 
-                      // 组装完整的 message 对象（GLM 使用标准格式，但 data: 后无空格）
-                      const assembledMessage = assembleStreamMessage(events);
-
-                      // 直接使用组装后的 message 对象作为 response.body
-                      // 如果组装失败（例如非标准 SSE），则使用原始流内容
+                      // 优先使用组装后的对象；失败时回退为原始 SSE 文本
                       requestEntry.response.body = assembledMessage || streamedContent;
                       appendFileSync(LOG_FILE, JSON.stringify(requestEntry, null, 2) + '\n---\n');
                     } catch (err) {

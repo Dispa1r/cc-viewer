@@ -5,6 +5,13 @@
  */
 import { isMainAgent, getSystemText } from './contentFilter';
 
+function isCodexRequest(req) {
+  if (!req) return false;
+  if (req.provider === 'openai') return true;
+  if (typeof req.url === 'string' && req.url.startsWith('codex://')) return true;
+  return req.body?.metadata?.source === 'codex_session';
+}
+
 function getMessageText(msg) {
   const c = msg?.content;
   if (typeof c === 'string') return c;
@@ -103,6 +110,10 @@ function isPreflightRequest(req, nextReq) {
  * @param {object} [nextReq] - 下一条请求（用于 Preflight 判断）
  */
 export function classifyRequest(req, nextReq) {
+  if (isCodexRequest(req)) {
+    return { type: 'CodexTurn', subType: null };
+  }
+
   if (isMainAgent(req)) {
     return { type: 'MainAgent', subType: null };
   }
@@ -126,6 +137,7 @@ export function classifyRequest(req, nextReq) {
 
 // Tag 显示文本
 export function formatRequestTag(type, subType) {
+  if (type === 'CodexTurn') return 'Codex:Turn';
   if (type === 'Plan' && subType) return `Plan:${subType}`;
   if (type === 'SubAgent' && subType) return `SubAgent:${subType}`;
   return type;
