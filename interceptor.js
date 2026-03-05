@@ -10,6 +10,7 @@ import { LOG_DIR } from './findcc.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const isCodexProvider = ['openai', 'codex'].includes((process.env.CCV_PROVIDER || '').toLowerCase());
 
 // 缓存从请求 headers 中提取的 API Key 或 Authorization header
 export let _cachedApiKey = null;
@@ -119,6 +120,9 @@ cleanupTempFiles(_logDir, _projectName);
 
 const _initPromise = (async () => {
   try {
+    // Codex 模式基于 ~/.codex/sessions 实时解析，不需要 cc-viewer 自身日志续写弹窗
+    if (isCodexProvider) return;
+
     const recentLog = findRecentLog(_logDir, _projectName);
     if (recentLog) {
       // Check if file is modified within 1 hour

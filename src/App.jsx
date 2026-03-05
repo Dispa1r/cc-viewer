@@ -760,7 +760,23 @@ class App extends React.Component {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ choice }),
-    }).catch(err => console.error('resume-choice failed:', err));
+    })
+      .then(async (res) => {
+        if (res.ok) {
+          // 正常情况下服务端会通过 SSE 推送 resume_resolved，这里做兜底，避免弹窗卡死
+          this.setState({ resumeModalVisible: false, resumeFileName: '' });
+          return;
+        }
+        let data = null;
+        try { data = await res.json(); } catch { }
+        // 已被其他窗口/连接处理时，直接关闭弹窗
+        if (res.status === 409) {
+          this.setState({ resumeModalVisible: false, resumeFileName: '' });
+          return;
+        }
+        console.error('resume-choice failed:', res.status, data || '');
+      })
+      .catch(err => console.error('resume-choice failed:', err));
   };
 
   handleLoadLocalJsonlFile = () => {
