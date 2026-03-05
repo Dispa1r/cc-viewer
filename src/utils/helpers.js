@@ -197,12 +197,12 @@ export function stripPrivateKeys(obj) {
 export function computeTokenStats(requests) {
   const byModel = {};
   for (const req of requests) {
-    const usage = req.response?.body?.usage;
-    if (!usage) continue;
     const model = req.body?.model || 'unknown';
     if (!byModel[model]) {
       byModel[model] = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
     }
+    const usage = req.response?.body?.usage;
+    if (!usage) continue;
     const s = byModel[model];
     s.input += (usage.input_tokens || 0);
     s.output += (usage.output_tokens || 0);
@@ -240,11 +240,26 @@ export function computeCacheRebuildStats(requests) {
 export function computeToolUsageStats(requests) {
   const toolCounts = {};
   for (const req of requests) {
+    // Claude 原始响应：response.body.content[].type = tool_use
     const content = req.response?.body?.content;
-    if (!Array.isArray(content)) continue;
-    for (const block of content) {
-      if (block.type === 'tool_use' && block.name) {
-        toolCounts[block.name] = (toolCounts[block.name] || 0) + 1;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === 'tool_use' && block.name) {
+          toolCounts[block.name] = (toolCounts[block.name] || 0) + 1;
+        }
+      }
+    }
+
+    // 统一消息格式（含 Codex 解析结果）：body.messages[].content[].type = tool_use
+    const messages = req.body?.messages;
+    if (Array.isArray(messages)) {
+      for (const msg of messages) {
+        const parts = Array.isArray(msg?.content) ? msg.content : [];
+        for (const block of parts) {
+          if (block?.type === 'tool_use' && block.name) {
+            toolCounts[block.name] = (toolCounts[block.name] || 0) + 1;
+          }
+        }
       }
     }
   }
