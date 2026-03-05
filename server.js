@@ -363,12 +363,22 @@ function readCodexEntries() {
   }
 }
 
-function readLogFile() {
-  if (isCodexProvider) {
-    const codexEntries = readCodexEntries();
-    if (codexEntries.length > 0) return codexEntries;
+function hasViewerLogEntries() {
+  if (!existsSync(LOG_FILE)) return false;
+  try {
+    const content = readFileSync(LOG_FILE, 'utf-8');
+    return content.split('\n---\n').some(line => line.trim());
+  } catch {
+    return false;
   }
+}
+
+function readLogFile() {
   if (!existsSync(LOG_FILE)) {
+    if (isCodexProvider) {
+      // Codex 模式兜底：当代理日志为空时，回退到 ~/.codex/sessions 解析
+      return readCodexEntries();
+    }
     return [];
   }
 
@@ -388,9 +398,15 @@ function readLogFile() {
       const key = `${entry.timestamp}|${entry.url}`;
       map.set(key, entry);
     }
-    return Array.from(map.values());
+    const viewerEntries = Array.from(map.values());
+    if (isCodexProvider && viewerEntries.length === 0) {
+      // Codex 模式兜底：代理日志尚未写入时，回退到 session 解析
+      return readCodexEntries();
+    }
+    return viewerEntries;
   } catch (err) {
     console.error('Error reading log file:', err);
+    if (isCodexProvider) return readCodexEntries();
     return [];
   }
 }
@@ -447,11 +463,11 @@ function watchLogFile(logFile) {
 }
 
 function startWatching() {
+  watchLogFile(LOG_FILE);
+  // Codex 模式下保留 session 轮询作为兜底（仅在代理日志为空时前端才会显示）
   if (isCodexProvider) {
     startWatchingCodexSession();
-    return;
   }
-  watchLogFile(LOG_FILE);
 }
 
 function startWatchingCodexSession() {
@@ -464,6 +480,9 @@ function startWatchingCodexSession() {
   };
 
   const tick = () => {
+    // 一旦代理日志有内容，优先使用代理日志实时流，不再用 session 快照覆盖列表
+    if (hasViewerLogEntries()) return;
+
     const latest = findLatestCodexSessionFile();
     if (!latest || !existsSync(latest)) return;
     let changed = false;
@@ -485,7 +504,7 @@ function startWatchingCodexSession() {
   };
 
   const initEntries = readCodexEntries();
-  if (initEntries.length > 0) {
+  if (!hasViewerLogEntries() && initEntries.length > 0) {
     clients.forEach(client => {
       try {
         client.write(`event: full_reload\ndata: ${JSON.stringify(initEntries)}\n\n`);
