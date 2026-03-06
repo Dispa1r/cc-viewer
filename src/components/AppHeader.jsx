@@ -238,11 +238,6 @@ class AppHeader extends React.Component {
     const models = Object.keys(byModel);
     const toolStats = computeToolUsageStats(requests);
     const skillStats = computeSkillUsageStats(requests);
-    const providerCounts = requests.reduce((acc, req) => {
-      const key = req.provider === 'openai' || (req.url || '').startsWith('codex://') ? 'Codex' : 'Claude';
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {});
 
     if (models.length === 0 && toolStats.length === 0) {
       return (
@@ -361,21 +356,6 @@ class AppHeader extends React.Component {
 
     return (
       <div className={styles.tokenStatsContainer}>
-        <div className={styles.toolStatsColumn}>
-          <div className={styles.modelCard}>
-            <div className={styles.modelName}>Provider</div>
-            <table className={styles.statsTable}>
-              <tbody>
-                {Object.entries(providerCounts).map(([name, count]) => (
-                  <tr key={name} className={styles.rowBorder}>
-                    <td className={styles.label}>{name}</td>
-                    <td className={styles.td}>{count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
         {tokenColumn}
         {cacheRebuildColumn}
         {toolColumn}

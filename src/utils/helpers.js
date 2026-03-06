@@ -197,17 +197,29 @@ export function stripPrivateKeys(obj) {
 export function computeTokenStats(requests) {
   const byModel = {};
   for (const req of requests) {
-    const model = req.body?.model || 'unknown';
+    const respBody = req.response?.body;
+    const model = req.body?.model
+      || respBody?.model
+      || respBody?.response?.model
+      || 'unknown';
     if (!byModel[model]) {
       byModel[model] = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
     }
-    const usage = req.response?.body?.usage;
+    const usage = respBody?.usage || respBody?.response?.usage;
     if (!usage) continue;
     const s = byModel[model];
-    s.input += (usage.input_tokens || 0);
-    s.output += (usage.output_tokens || 0);
-    s.cacheCreation += (usage.cache_creation_input_tokens || 0);
-    s.cacheRead += (usage.cache_read_input_tokens || 0);
+    const input = usage.input_tokens || 0;
+    const output = usage.output_tokens || 0;
+    const cacheCreation = usage.cache_creation_input_tokens || 0;
+    const cacheRead = usage.cache_read_input_tokens
+      || usage.cached_input_tokens
+      || usage?.input_tokens_details?.cached_tokens
+      || 0;
+
+    s.input += input;
+    s.output += output;
+    s.cacheCreation += cacheCreation;
+    s.cacheRead += cacheRead;
   }
   return byModel;
 }
