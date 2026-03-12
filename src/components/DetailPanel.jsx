@@ -25,6 +25,14 @@ class DetailPanel extends React.Component {
     };
   }
 
+  formatDuration(ms) {
+    if (!ms || Number.isNaN(Number(ms))) return '';
+    const n = Number(ms);
+    if (n < 1000) return `${n}ms`;
+    if (n < 60_000) return `${(n / 1000).toFixed(2)}s`;
+    return `${(n / 60_000).toFixed(2)}min`;
+  }
+
   componentDidMount() {
     fetch('/api/preferences').then(r => r.json()).then(prefs => {
       if (prefs.diffTooltipDismissed) this.setState({ diffTooltipDismissed: true });
@@ -534,7 +542,7 @@ class DetailPanel extends React.Component {
             <Space size="small" wrap>
               <Tag color={request.method === 'POST' ? 'blue' : 'green'}>{request.method}</Tag>
               <Text type="secondary" className={styles.metaText}>🕐 {time}</Text>
-              {request.duration && <Text type="secondary" className={styles.metaText}>⏱️ {request.duration}ms</Text>}
+              {request.duration && <Text type="secondary" className={styles.metaText}>⏱️ {this.formatDuration(request.duration)}</Text>}
               {request.response && (
                 <Tag color={statusOk ? 'success' : 'error'}>HTTP {request.response.status}</Tag>
               )}

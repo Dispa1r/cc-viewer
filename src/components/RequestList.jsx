@@ -30,6 +30,14 @@ class RequestList extends React.Component {
     }
   }
 
+  formatDuration(ms) {
+    if (!ms || Number.isNaN(Number(ms))) return '';
+    const n = Number(ms);
+    if (n < 1000) return `${n}ms`;
+    if (n < 60_000) return `${(n / 1000).toFixed(2)}s`;
+    return `${(n / 60_000).toFixed(2)}min`;
+  }
+
   render() {
     const { requests, selectedIndex, onSelect } = this.props;
 
@@ -91,7 +99,7 @@ class RequestList extends React.Component {
                   </div>
                   <div className={styles.detailRow}>
                     <span className={styles.urlText} title={req.url}>{urlShort}</span>
-                    {req.duration && <span className={styles.duration}>{req.duration}ms</span>}
+                    {req.duration && <span className={styles.duration}>{this.formatDuration(req.duration)}</span>}
                     {req.response && (
                       <span className={statusOk ? styles.statusOk : statusErr ? styles.statusErr : styles.statusDefault}>
                         {req.response.status}

@@ -364,6 +364,23 @@ function readCodexEntries() {
 }
 
 function hasViewerLogEntries() {
+  // Codex 模式下可能会跨多个日志文件（新开会话/重启），按项目目录整体判断
+  if (isCodexProvider) {
+    try {
+      const projectDir = join(LOG_DIR, _projectName || '');
+      if (!existsSync(projectDir)) return false;
+      const files = readdirSync(projectDir)
+        .filter(f => f.endsWith('.jsonl') && !f.endsWith('_temp.jsonl'));
+      for (const f of files) {
+        const p = join(projectDir, f);
+        const content = readFileSync(p, 'utf-8');
+        if (content.split('\n---\n').some(line => line.trim())) return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
   if (!existsSync(LOG_FILE)) return false;
   try {
     const content = readFileSync(LOG_FILE, 'utf-8');
@@ -373,12 +390,42 @@ function hasViewerLogEntries() {
   }
 }
 
-function readLogFile() {
-  if (!existsSync(LOG_FILE)) {
-    if (isCodexProvider) {
-      // Codex 模式兜底：当代理日志为空时，回退到 ~/.codex/sessions 解析
-      return readCodexEntries();
+function readViewerEntriesForCodexProject() {
+  try {
+    const projectDir = join(LOG_DIR, _projectName || '');
+    if (!existsSync(projectDir)) return [];
+    const files = readdirSync(projectDir)
+      .filter(f => f.endsWith('.jsonl') && !f.endsWith('_temp.jsonl'))
+      .sort();
+    const parsed = [];
+    for (const f of files) {
+      const content = readFileSync(join(projectDir, f), 'utf-8');
+      const entries = content.split('\n---\n').filter(line => line.trim());
+      for (const entry of entries) {
+        try {
+          parsed.push(JSON.parse(entry));
+        } catch { }
+      }
     }
+    const map = new Map();
+    for (const entry of parsed) {
+      const key = `${entry.timestamp}|${entry.url}`;
+      map.set(key, entry);
+    }
+    return Array.from(map.values());
+  } catch {
+    return [];
+  }
+}
+
+function readLogFile() {
+  if (isCodexProvider) {
+    const codexViewerEntries = readViewerEntriesForCodexProject();
+    if (codexViewerEntries.length > 0) return codexViewerEntries;
+    return readCodexEntries();
+  }
+
+  if (!existsSync(LOG_FILE)) {
     return [];
   }
 
@@ -398,15 +445,9 @@ function readLogFile() {
       const key = `${entry.timestamp}|${entry.url}`;
       map.set(key, entry);
     }
-    const viewerEntries = Array.from(map.values());
-    if (isCodexProvider && viewerEntries.length === 0) {
-      // Codex 模式兜底：代理日志尚未写入时，回退到 session 解析
-      return readCodexEntries();
-    }
-    return viewerEntries;
+    return Array.from(map.values());
   } catch (err) {
     console.error('Error reading log file:', err);
-    if (isCodexProvider) return readCodexEntries();
     return [];
   }
 }
